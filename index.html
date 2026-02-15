@@ -1,54 +1,103 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Nokia Digital Twin - SRM Campus</title>
+    <title>Nokia Digital Twin | Interactive SRM Campus</title>
     <style>
         body { margin: 0; background: #050505; color: #00f2ff; font-family: 'Courier New', monospace; overflow: hidden; }
-        #info { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.8); padding: 10px; border: 1px solid #00f2ff; }
+        #overlay { 
+            position: absolute; top: 20px; left: 20px; z-index: 10; 
+            background: rgba(0, 10, 20, 0.85); padding: 15px; 
+            border: 2px solid #00f2ff; box-shadow: 0 0 15px #00f2ff;
+            pointer-events: none;
+        }
+        .legend { margin-top: 10px; font-size: 0.8em; }
+        .high-latency { color: #ff0055; } /* Red for lag */
+        .low-latency { color: #00f2ff; }  /* Cyan for URLLC */
     </style>
 </head>
 <body>
-    <div id="info">🛰️ NOKIA DIGITAL TWIN: SRM CAMPUS<br>Status: <span id="status">Connecting...</span></div>
+    <div id="overlay">
+        🛰️ NOKIA INTERACTIVE MONITOR: SRM<br>
+        <small>MOUSE: Drag to Rotate | Scroll to Zoom</small>
+        <hr style="border: 0.5px solid #00f2ff">
+        <div id="telemetry">Waiting for TraCI stream...</div>
+        <div class="legend">
+            <span style="color:#00f2ff">■</span> 5G URLLC (Active)<br>
+            <span style="color:#ff0055">■</span> Network Congestion
+        </div>
+    </div>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
     <script>
+        // 1. Scene & Renderer Setup
         const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // Grid to represent SRM Roads
-        const grid = new THREE.GridHelper(200, 50, 0x00f2ff, 0x222222);
+        // 2. Environment (Infinite Grid)
+        const grid = new THREE.GridHelper(10000, 200, 0x00f2ff, 0x111111);
         scene.add(grid);
 
-        camera.position.set(50, 50, 50);
-        camera.lookAt(0,0,0);
+        // 3. Coordinate Offsets (Re-centering the world)
+        // These match the center of your SRM campus coordinates
+        const offsetX = 7000; 
+        const offsetZ = 12000;
 
-        const vehicleModels = {};
+        // 4. Interaction Controls
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        camera.position.set(0, 500, 500); // Top-down perspective
 
-        // WebSocket Connection
+        const vehicles = {};
+        const telemetryBox = document.getElementById('telemetry');
+
+        // 5. WebSocket Connection
         const ws = new WebSocket('ws://localhost:8765');
-        ws.onopen = () => document.getElementById('status').innerText = "LIVE - Syncing TraCI";
         
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            
+            let activeIDs = "ACTIVE UEs:<br>";
+
             for (const id in data) {
-                if (!vehicleModels[id]) {
-                    // Create a "Cyber Car" (Glowing Cube)
-                    const geometry = new THREE.BoxGeometry(1, 0.5, 2);
+                // Calculate local coordinates by subtracting the SRM offset
+                // This brings the cars from 7200 to near 0 for the camera
+                const rawX = (data[id].x + 65) * 100;
+                const rawZ = (data[id].y + 120) * 100;
+                const localX = rawX - offsetX;
+                const localZ = rawZ - offsetZ;
+
+                // Create car model if new
+                if (!vehicles[id]) {
+                    const geometry = new THREE.BoxGeometry(10, 5, 20);
                     const material = new THREE.MeshBasicMaterial({ color: 0x00f2ff, wireframe: true });
                     const car = new THREE.Mesh(geometry, material);
                     scene.add(car);
-                    vehicleModels[id] = car;
+                    vehicles[id] = car;
+                    
+                    // First time we see a car, point the camera at the campus center
+                    controls.target.set(0, 0, 0);
                 }
-                
-                // Update Position from SUMO
-                vehicleModels[id].position.x = data[id].x - 65; // Adjusting offset based on your logs
-                vehicleModels[id].position.z = data[id].y - 120;
-                vehicleModels[id].rotation.y = -data[id].angle * (Math.PI / 180);
+
+                // Update 3D car position and rotation
+                vehicles[id].position.set(localX, 2.5, localZ);
+                vehicles[id].rotation.y = -data[id].angle * (Math.PI / 180);
+
+                // --- PHASE 4: NETWORK LAYER VISUALIZATION ---
+                // If latency is sent from Python, change color
+                if (data[id].latency > 50) {
+                    vehicles[id].material.color.setHex(0xff0055); // Red Alert
+                } else {
+                    vehicles[id].material.color.setHex(0x00f2ff); // Healthy Cyan
+                }
+
+                activeIDs += `ID: ${id} | LAT: ${data[id].latency || '0'}ms<br>`;
             }
+            telemetryBox.innerHTML = activeIDs;
+            controls.update(); 
         };
 
         function animate() {
@@ -56,6 +105,13 @@
             renderer.render(scene, camera);
         }
         animate();
+
+        // Responsive Resizing
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
