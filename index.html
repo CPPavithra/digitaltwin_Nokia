@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Nokia Digital Twin - SRM Campus</title>
+    <style>
+        body { margin: 0; background: #050505; color: #00f2ff; font-family: 'Courier New', monospace; overflow: hidden; }
+        #info { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.8); padding: 10px; border: 1px solid #00f2ff; }
+    </style>
+</head>
+<body>
+    <div id="info">🛰️ NOKIA DIGITAL TWIN: SRM CAMPUS<br>Status: <span id="status">Connecting...</span></div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Grid to represent SRM Roads
+        const grid = new THREE.GridHelper(200, 50, 0x00f2ff, 0x222222);
+        scene.add(grid);
+
+        camera.position.set(50, 50, 50);
+        camera.lookAt(0,0,0);
+
+        const vehicleModels = {};
+
+        // WebSocket Connection
+        const ws = new WebSocket('ws://localhost:8765');
+        ws.onopen = () => document.getElementById('status').innerText = "LIVE - Syncing TraCI";
+        
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            for (const id in data) {
+                if (!vehicleModels[id]) {
+                    // Create a "Cyber Car" (Glowing Cube)
+                    const geometry = new THREE.BoxGeometry(1, 0.5, 2);
+                    const material = new THREE.MeshBasicMaterial({ color: 0x00f2ff, wireframe: true });
+                    const car = new THREE.Mesh(geometry, material);
+                    scene.add(car);
+                    vehicleModels[id] = car;
+                }
+                
+                // Update Position from SUMO
+                vehicleModels[id].position.x = data[id].x - 65; // Adjusting offset based on your logs
+                vehicleModels[id].position.z = data[id].y - 120;
+                vehicleModels[id].rotation.y = -data[id].angle * (Math.PI / 180);
+            }
+        };
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
